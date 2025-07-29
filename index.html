@@ -1,0 +1,144 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html>
+<head>
+    <title>Secure Chat</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        #chat { border: 1px solid #ccc; padding: 10px; height: 400px; overflow-y: scroll; }
+        #message { width: 80%; padding: 5px; }
+        #send { padding: 5px 10px; }
+    </style>
+</head>
+<body>
+    <h1>Secure Chat</h1>
+    <div>
+        <input id="username" placeholder="Username">
+        <input id="recipient" placeholder="Recipient">
+        <input id="room" placeholder="Room">
+        <button onclick="register()">Register</button>
+        <button onclick="joinRoom()">Join Room</button>
+    </div>
+    <div id="chat"></div>
+    <div>
+        <input id="message" placeholder="Type a message">
+        <button id="send" onclick="sendMessage()">Send</button>
+    </div>
+
+    <script>
+        const socket = io();
+        let privateKey, publicKey, username, room;
+
+        async function register() {
+            username = document.getElementById('username').value;
+            if (!username) return alert('Enter a username');
+
+            const response = await fetch('/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username })
+            });
+            const data = await response.json();
+            if (data.error) return alert(data.error);
+            
+            privateKey = data.private_key;
+            publicKey = data.public_key;
+            alert('Registered successfully!');
+        }
+
+        async function joinRoom() {
+            room = document.getElementById('room').value;
+            username = document.getElementById('username').value;
+            if (!username || !room) return alert('Enter username and room');
+
+            socket.emit('join', { username, room });
+        }
+
+        function sendMessage() {
+            const recipient = document.getElementById('recipient').value;
+            const message = document.getElementById('message').value;
+            if (!recipient || !message || !room) return alert('Fill all fields');
+
+            socket.emit('message', {
+                sender: username,
+                recipient,
+                message,
+                room
+            });
+            document.getElementById('message').value = '';
+        }
+
+        socket.on('chat_history', (data) => {
+            const chat = document.getElementById('chat');
+            chat.innerHTML = '';
+            data.messages.forEach(msg => {
+                if (msg.sender === username || msg.recipient === username) {
+                    const decrypted = decryptMessage(msg.encrypted_message, msg.encrypted_aes_key, msg.iv);
+                    chat.innerHTML += `<p><b>${msg.sender}:</b> ${decrypted}</p>`;
+                }
+            });
+        });
+
+        socket.on('message', (data) => {
+            if (data.recipient === username || data.sender === username) {
+                const decrypted = decryptMessage(data.encrypted_message, data.encrypted_aes_key, data.iv);
+                const chat = document.getElementById('chat');
+                chat.innerHTML += `<p><b>${data.sender}:</b> ${decrypted}</p>`;
+                chat.scrollTop = chat.scrollHeight;
+            }
+        });
+
+        socket.on('error', (data) => {
+            alert(data.message);
+        });
+
+        // Note: Client-side decryption requires a JavaScript crypto library compatible with Python's cryptography
+        // For simplicity, we're assuming a compatible decryptMessage function
+        function decryptMessage(encryptedMessage, encryptedAesKey, iv) {
+            // This is a placeholder - in a real app, use a JS crypto library
+            // that can handle RSA-OAEP and AES-CBC decryption
+            return "Decrypted: " + encryptedMessage; // Replace with actual decryption
+        }
+    </script>
+</body>
+</html>
